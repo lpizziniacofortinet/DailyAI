@@ -1,0 +1,47 @@
+================================================================================
+DAILYAI INTELLIGENCE BRIEF
+Autonomous Verified Intelligence in AI, Cybersecurity & V2X
+Date: {{ date_str }}
+Run ID: {{ id }}
+================================================================================
+
+{% for section in sections %}
+{% if section.articles %}
+--------------------------------------------------------------------------------
+{{ section.title | upper }}
+--------------------------------------------------------------------------------
+{% for article in section.articles %}
+* {{ article.final_headline }}
+  Source: {{ article.original_source_name }}{% if article.published_date %} ({{ article.published_date }}){% endif %} | Verification: {{ "%.0f"|format(article.verification.confidence_score * 100) }}%
+
+  {{ article.final_summary }}
+
+{% if article.draft.key_points %}
+  Key Highlights:
+{% for pt in article.draft.key_points %}
+  - {{ pt }}
+{% endfor %}
+{% endif %}
+
+{% if article.impact_analysis %}
+  Why It Matters:
+  {{ article.impact_analysis }}
+{% endif %}
+
+{% if article.caveats_and_uncertainty %}
+  [CAVEAT / UNCERTAINTY NOTE]:
+{% for caveat in article.caveats_and_uncertainty %}
+  - {{ caveat }}
+{% endfor %}
+{% endif %}
+
+  Direct Source URL: {{ article.source_url }}
+
+{% endfor %}
+{% endif %}
+{% endfor %}
+
+================================================================================
+Generated automatically by DailyAI Pipeline.
+Factual verification performed across authoritative primary sources.
+================================================================================

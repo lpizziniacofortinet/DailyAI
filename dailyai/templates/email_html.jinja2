@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ title }}</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #1e293b;
+      line-height: 1.6;
+    }
+    table {
+      border-spacing: 0;
+    }
+    img {
+      border: 0;
+    }
+    .wrapper {
+      width: 100%;
+      table-layout: fixed;
+      background-color: #f8fafc;
+      padding-bottom: 40px;
+    }
+    .main-container {
+      background-color: #ffffff;
+      margin: 0 auto;
+      width: 100%;
+      max-width: 680px;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #e2e8f0;
+    }
+    .header {
+      background-color: #0f172a;
+      padding: 32px 28px;
+      text-align: left;
+    }
+    .brand-title {
+      color: #ffffff;
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin: 0 0 6px 0;
+    }
+    .brand-subtitle {
+      color: #94a3b8;
+      font-size: 14px;
+      margin: 0;
+    }
+    .date-badge {
+      display: inline-block;
+      margin-top: 14px;
+      background-color: #1e293b;
+      color: #38bdf8;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .content-body {
+      padding: 24px 28px;
+    }
+    .section-header {
+      margin: 32px 0 16px 0;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #e2e8f0;
+    }
+    .section-title {
+      font-size: 19px;
+      font-weight: 700;
+      margin: 0;
+      color: #0f172a;
+    }
+    .article-card {
+      background-color: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .article-header {
+      margin-bottom: 12px;
+    }
+    .article-title {
+      font-size: 17px;
+      font-weight: 700;
+      line-height: 1.4;
+      margin: 0 0 8px 0;
+      color: #0f172a;
+    }
+    .article-title a {
+      color: #0f172a;
+      text-decoration: none;
+    }
+    .article-title a:hover {
+      color: #2563eb;
+      text-decoration: underline;
+    }
+    .meta-bar {
+      font-size: 12px;
+      color: #64748b;
+      margin-bottom: 12px;
+    }
+    .meta-source {
+      font-weight: 600;
+      color: #334155;
+    }
+    .article-summary {
+      font-size: 14px;
+      color: #334155;
+      margin-bottom: 12px;
+      line-height: 1.6;
+    }
+    .points-list {
+      margin: 0 0 14px 0;
+      padding-left: 20px;
+      font-size: 13.5px;
+      color: #334155;
+    }
+    .points-list li {
+      margin-bottom: 6px;
+    }
+    .impact-box {
+      background-color: #f0fdf4;
+      border-left: 3px solid #22c55e;
+      padding: 10px 14px;
+      border-radius: 0 4px 4px 0;
+      margin-bottom: 12px;
+      font-size: 13px;
+      color: #166534;
+    }
+    .impact-label {
+      font-weight: 700;
+    }
+    .caveat-box {
+      background-color: #fffbeb;
+      border-left: 3px solid #f59e0b;
+      padding: 10px 14px;
+      border-radius: 0 4px 4px 0;
+      margin-bottom: 12px;
+      font-size: 13px;
+      color: #92400e;
+    }
+    .tags-row {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px dashed #e2e8f0;
+    }
+    .tag-badge {
+      display: inline-block;
+      background-color: #f1f5f9;
+      color: #475569;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-right: 6px;
+      margin-bottom: 4px;
+    }
+    .cve-badge {
+      background-color: #fee2e2;
+      color: #991b1b;
+    }
+    .read-more-link {
+      display: inline-block;
+      float: right;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: #2563eb;
+      text-decoration: none;
+    }
+    .read-more-link:hover {
+      text-decoration: underline;
+    }
+    .footer {
+      background-color: #f1f5f9;
+      padding: 24px 28px;
+      text-align: center;
+      font-size: 12px;
+      color: #64748b;
+      border-top: 1px solid #e2e8f0;
+    }
+    .footer p {
+      margin: 4px 0;
+    }
+    .clearfix::after {
+      content: "";
+      clear: both;
+      display: table;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+      <tr>
+        <td align="center" style="padding: 24px 12px;">
+          <div class="main-container">
+            <!-- Header -->
+            <div class="header">
+              <h1 class="brand-title">DailyAI Intelligence Brief</h1>
+              <p class="brand-subtitle">Autonomous Verified Intelligence in AI, Cybersecurity &amp; V2X</p>
+              <div class="date-badge">{{ date_str }}</div>
+            </div>
+
+            <!-- Content -->
+            <div class="content-body">
+              {% for section in sections %}
+                {% if section.articles %}
+                  <div class="section-header">
+                    <h2 class="section-title">{{ section.title }}</h2>
+                  </div>
+
+                  {% for article in section.articles %}
+                    <div class="article-card">
+                      <div class="article-header">
+                        <h3 class="article-title">
+                          <a href="{{ article.source_url }}" target="_blank" rel="noopener noreferrer">
+                            {{ article.final_headline }}
+                          </a>
+                        </h3>
+                        <div class="meta-bar">
+                          Source: <span class="meta-source">{{ article.original_source_name }}</span>
+                          {% if article.published_date %}
+                            &bull; Published: {{ article.published_date }}
+                          {% endif %}
+                          &bull; Verification Score: <strong>{{ "%.0f"|format(article.verification.confidence_score * 100) }}%</strong>
+                        </div>
+                      </div>
+
+                      <div class="article-summary">
+                        {{ article.final_summary }}
+                      </div>
+
+                      {% if article.draft.key_points %}
+                        <ul class="points-list">
+                          {% for pt in article.draft.key_points %}
+                            <li>{{ pt }}</li>
+                          {% endfor %}
+                        </ul>
+                      {% endif %}
+
+                      {% if article.impact_analysis %}
+                        <div class="impact-box">
+                          <span class="impact-label">Why it matters:</span> {{ article.impact_analysis }}
+                        </div>
+                      {% endif %}
+
+                      {% if article.caveats_and_uncertainty %}
+                        <div class="caveat-box">
+                          <strong>⚠️ Verification Note:</strong>
+                          {% for caveat in article.caveats_and_uncertainty %}
+                            <span>{{ caveat }}</span>{% if not loop.last %}; {% endif %}
+                          {% endfor %}
+                        </div>
+                      {% endif %}
+
+                      <div class="tags-row clearfix">
+                        <div style="float: left;">
+                          {% for cve in article.cve_identifiers %}
+                            <span class="tag-badge cve-badge">{{ cve }}</span>
+                          {% endfor %}
+                          {% for std in article.standards_mentioned %}
+                            <span class="tag-badge">{{ std }}</span>
+                          {% endfor %}
+                          {% for entity in article.draft.entities_mentioned[:3] %}
+                            <span class="tag-badge">{{ entity }}</span>
+                          {% endfor %}
+                        </div>
+                        <a href="{{ article.source_url }}" target="_blank" rel="noopener noreferrer" class="read-more-link">
+                          Read Original Source &rarr;
+                        </a>
+                      </div>
+                    </div>
+                  {% endfor %}
+                {% endif %}
+              {% endfor %}
+            </div>
+
+            <!-- Footer -->
+            <div class="footer">
+              <p>Generated by <strong>DailyAI Autonomous Pipeline</strong> &bull; Factual Accuracy &amp; Independent Verification Engine</p>
+              <p>Articles validated: {{ total_articles }} items &bull; Run ID: <code>{{ id }}</code></p>
+              <p style="margin-top: 12px; font-size: 11px; color: #94a3b8;">
+                To update your subscription preferences or topics, update your environment configuration.
+              </p>
+            </div>
+          </div>
+        </td>
+      </tr>
+    </table>
+  </div>
+</body>
+</html>

@@ -220,3 +220,49 @@ def reset_settings(new_settings: Optional[Settings] = None) -> None:
     """Reset global settings (useful for tests)."""
     global _global_settings
     _global_settings = new_settings
+
+from pydantic import HttpUrl
+
+class DeliveryConfig(BaseSettings):
+    """
+    Centralized configuration state for the DailyAI delivery subsystem.
+    Validates environment variables at instantiation to prevent runtime URL mapping errors.
+    """
+    enable_discord: bool = False
+    discord_webhook_url: Optional[HttpUrl] = None
+
+    enable_slack: bool = False
+    slack_webhook_url: Optional[HttpUrl] = None
+
+    enable_teams: bool = False
+    teams_webhook_url: Optional[HttpUrl] = None
+
+    @field_validator("discord_webhook_url", mode="before")
+    @classmethod
+    def validate_discord_url(cls, v, info):
+        if info.data.get("enable_discord") and not v:
+            raise ValueError("Configuration Error: DISCORD_WEBHOOK_URL must be provided when ENABLE_DISCORD_DELIVERY is true")
+        return v
+
+    @field_validator("slack_webhook_url", mode="before")
+    @classmethod
+    def validate_slack_url(cls, v, info):
+        if info.data.get("enable_slack") and not v:
+            raise ValueError("Configuration Error: SLACK_WEBHOOK_URL must be provided when ENABLE_SLACK_DELIVERY is true")
+        return v
+
+    @field_validator("teams_webhook_url", mode="before")
+    @classmethod
+    def validate_teams_url(cls, v, info):
+        if info.data.get("enable_teams") and not v:
+            raise ValueError("Configuration Error: TEAMS_WEBHOOK_URL must be provided when ENABLE_TEAMS_DELIVERY is true")
+        return v
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_ignore_empty=True,
+        extra="ignore",
+    )
+
+# Singleton instance to be imported across the application
+settings = DeliveryConfig()

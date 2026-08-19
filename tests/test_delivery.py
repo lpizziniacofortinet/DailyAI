@@ -75,3 +75,56 @@ def test_smtp_delivery_enabled(mock_smtp_class, test_settings, mock_newsletter):
     assert success is True
     assert mock_smtp_class.called
     assert mock_server.send_message.called
+
+import respx
+import httpx
+from dailyai.services.delivery.discord import DiscordDeliveryService
+from dailyai.services.delivery.slack import SlackDeliveryService
+from dailyai.pipeline.orchestrator import distribute_results
+
+@pytest.fixture
+def sample_data():
+    return {
+        "title": "System Audit",
+        "content": "Execution completed successfully.",
+        "metadata": {"execution_id": "ABC-12345", "latency_ms": 42}
+    }
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_discord_delivery_success(sample_data):
+    url = "https://discord.com/api/webhooks/test-transaction"
+    service = DiscordDeliveryService(url)
+
+    request = respx.post(url).mock(return_value=httpx.Response(204))
+
+    success = await service.deliver(sample_data)
+
+    assert success is True
+    assert request.called
+
+    payload = request.calls.last.request.content.decode("utf-8")
+    assert "embeds" in payload
+    assert "System Audit" in payload
+
+    await service.close()
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_orchestrator_fault_isolation(sample_data):
+    discord_url = "https://discord.com/api/webhooks/fail"
+    slack_url = "https://hooks.slack.com/services/success"
+
+    services = [
+        DiscordDeliveryService(discord_url),
+        SlackDeliveryService(slack_url)
+    ]
+
+    discord_route = respx.post(discord_url).mock(return_value=httpx.Response(500))
+    slack_route = respx.post(slack_url).mock(return_value=httpx.Response(200))
+
+    with patch("dailyai.pipeline.orchestrator.DeliveryFactory.get_enabled_services", return_value=services):
+        await distribute_results(sample_data)
+
+    assert discord_route.called is True
+    assert slack_route.called is True

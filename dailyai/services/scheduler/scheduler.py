@@ -79,6 +79,9 @@ class PipelineScheduler:
                     id="dailyai_cron_pipeline",
                     name="DailyAI Daily Scheduled Intelligence Run",
                     replace_existing=True,
+                    max_instances=1,
+                    coalesce=True,
+                    misfire_grace_time=300,
                 )
                 logger.info(f"Configured cron schedule: '{self.settings.schedule_cron}' (UTC)")
                 return
@@ -92,5 +95,8 @@ class PipelineScheduler:
             id="dailyai_interval_pipeline",
             name=f"DailyAI Interval Intelligence Run ({minutes}m)",
             replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
         )
         logger.info(f"Configured interval schedule: Every {minutes} minutes.")

@@ -83,8 +83,47 @@ class FactCheckAgent(BaseAgent[List[ArticleDraft], List[VerifiedArticle]]):
 
     def _cross_check_and_verify(self, draft: ArticleDraft) -> VerificationResult:
         """Independently verify claims made in the research draft using LLM & heuristics."""
-        # 1. Deterministic Date Freshness Check
-        if draft.published_date and is_article_outdated(draft.published_date, self.settings.lookback_hours):
+        # 1. Deterministic date gate. Unknown dates are not evidence of freshness.
+        if self.settings.fact_check_strict_mode and not draft.published_date:
+            return VerificationResult(
+                status=VerificationStatus.INSUFFICIENT_EVIDENCE,
+                confidence_score=0.0,
+                claims_checked=[],
+                hallucinations_detected=[],
+                technical_terms_verified=[],
+                rejection_reason="Publication date is missing; strict mode requires a verifiable date.",
+                quality_score=0.0,
+                cross_check_sources=[],
+            )
+        if draft.published_date:
+            try:
+                parsed_date = date_parser.parse(draft.published_date)
+                if parsed_date.tzinfo is None:
+                    parsed_date = parsed_date.replace(tzinfo=timezone.utc)
+                if parsed_date > datetime.now(timezone.utc) + timedelta(hours=24):
+                    return VerificationResult(
+                        status=VerificationStatus.INSUFFICIENT_EVIDENCE,
+                        confidence_score=0.0,
+                        claims_checked=[],
+                        hallucinations_detected=[],
+                        technical_terms_verified=[],
+                        rejection_reason="Publication date is unexpectedly in the future.",
+                        quality_score=0.0,
+                        cross_check_sources=[],
+                    )
+            except (ValueError, TypeError, OverflowError):
+                if self.settings.fact_check_strict_mode:
+                    return VerificationResult(
+                        status=VerificationStatus.INSUFFICIENT_EVIDENCE,
+                        confidence_score=0.0,
+                        claims_checked=[],
+                        hallucinations_detected=[],
+                        technical_terms_verified=[],
+                        rejection_reason="Publication date is malformed and cannot be verified.",
+                        quality_score=0.0,
+                        cross_check_sources=[],
+                    )
+            if is_article_outdated(draft.published_date, self.settings.lookback_hours):
             self.logger.warning(
                 f"Rejecting outdated article: '{draft.title}' (Published: {draft.published_date}, lookback: {self.settings.lookback_hours}h)"
             )

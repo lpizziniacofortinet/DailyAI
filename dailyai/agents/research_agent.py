@@ -241,14 +241,7 @@ YOUR OBJECTIVES:
                 draft = self._synthesize_draft(item)
                 if draft:
                     domain_drafts.append(draft)
-                    # Mark URL as seen in storage if not in dry-run mode
-                    if not self.settings.dry_run:
-                        self.storage.mark_url_seen(
-                            url=draft.source_url,
-                            title=draft.title,
-                            domain=domain.value,
-                            draft_id=draft.id,
-                        )
+                    # Persist only after successful publication; failed or rejected drafts remain retryable.
 
             self.logger.info(f"Domain '{domain.value}' synthesized {len(domain_drafts)} research drafts.")
             all_drafts.extend(domain_drafts)

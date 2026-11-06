@@ -89,3 +89,45 @@ def test_fact_check_outdated_article_rejection(test_settings, mock_llm):
     assert result.success is True
     # The outdated article must be rejected
     assert len(result.output) == 0
+
+
+def test_fact_check_provider_failure_fails_closed(test_settings, mock_llm, sample_draft):
+    agent = FactCheckAgent(settings=test_settings, llm_client=mock_llm)
+
+    def unavailable_provider(**kwargs):
+        raise RuntimeError("provider unavailable")
+
+    agent.llm.generate_structured = unavailable_provider
+    result = agent._cross_check_and_verify(sample_draft)
+    assert result.status == VerificationStatus.INSUFFICIENT_EVIDENCE
+    assert result.confidence_score == 0.0
+    assert result.claims_checked[0].status == "UNVERIFIED"
+    assert result.rejection_reason
+
+
+def test_fact_check_missing_date_fails_closed(test_settings, mock_llm, sample_draft):
+    agent = FactCheckAgent(settings=test_settings, llm_client=mock_llm)
+    draft = sample_draft.model_copy(update={"published_date": None})
+    result = agent._cross_check_and_verify(draft)
+    assert result.status == VerificationStatus.INSUFFICIENT_EVIDENCE
+    assert result.confidence_score == 0.0
+    assert "date is missing" in result.rejection_reason.lower()
+
+
+def test_fact_check_malformed_date_fails_closed(test_settings, mock_llm, sample_draft):
+    agent = FactCheckAgent(settings=test_settings, llm_client=mock_llm)
+    draft = sample_draft.model_copy(update={"published_date": "not-a-date"})
+    result = agent._cross_check_and_verify(draft)
+    assert result.status == VerificationStatus.INSUFFICIENT_EVIDENCE
+
+
+def test_fact_check_future_date_fails_closed(test_settings, mock_llm, sample_draft):
+    from datetime import datetime, timedelta, timezone
+
+    agent = FactCheckAgent(settings=test_settings, llm_client=mock_llm)
+    future = (datetime.now(timezone.utc) + timedelta(days=3)).date().isoformat()
+    draft = sample_draft.model_copy(update={"published_date": future})
+    result = agent._cross_check_and_verify(draft)
+    assert result.status == VerificationStatus.INSUFFICIENT_EVIDENCE
+    assert result.confidence_score == 0.0
+    assert "future" in result.rejection_reason.lower()

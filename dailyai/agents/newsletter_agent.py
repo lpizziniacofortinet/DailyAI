@@ -161,22 +161,24 @@ Requirements:
             recipients=self.settings.email_recipients,
         )
 
-        # Execute distribution via configured channels
-        all_delivered = True
+        # A successful archive or delivery channel is a durable publication outcome.
+        # SMTP failure must not erase a successful file archive, but total channel failure
+        # must leave articles eligible for retry.
+        successful_channels = 0
         for channel in self.delivery_channels:
             try:
-                success = channel.deliver(newsletter)
-                if not success:
-                    all_delivered = False
+                if channel.deliver(newsletter):
+                    successful_channels += 1
             except Exception as e:
                 self.logger.error(f"Delivery channel '{channel.__class__.__name__}' error: {e}")
-                all_delivered = False
 
-        newsletter.delivered_successfully = all_delivered
-        newsletter.delivery_timestamp = datetime.now(timezone.utc)
+        newsletter.delivered_successfully = successful_channels > 0
+        newsletter.delivery_timestamp = (
+            datetime.now(timezone.utc) if successful_channels else None
+        )
 
-        # Record published articles in persistent store (unless dry_run)
-        if not self.settings.dry_run:
+        # Record articles only when at least one configured channel succeeded.
+        if successful_channels and not self.settings.dry_run:
             for section in sections:
                 for article in section.articles:
                     self.storage.mark_article_published(

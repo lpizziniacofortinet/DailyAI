@@ -83,21 +83,60 @@ class FactCheckAgent(BaseAgent[List[ArticleDraft], List[VerifiedArticle]]):
 
     def _cross_check_and_verify(self, draft: ArticleDraft) -> VerificationResult:
         """Independently verify claims made in the research draft using LLM & heuristics."""
-        # 1. Deterministic Date Freshness Check
-        if draft.published_date and is_article_outdated(draft.published_date, self.settings.lookback_hours):
-            self.logger.warning(
-                f"Rejecting outdated article: '{draft.title}' (Published: {draft.published_date}, lookback: {self.settings.lookback_hours}h)"
-            )
+        # 1. Deterministic date gate. Unknown dates are not evidence of freshness.
+        if self.settings.fact_check_strict_mode and not draft.published_date:
             return VerificationResult(
-                status=VerificationStatus.REJECTED,
-                confidence_score=0.1,
+                status=VerificationStatus.INSUFFICIENT_EVIDENCE,
+                confidence_score=0.0,
                 claims_checked=[],
                 hallucinations_detected=[],
                 technical_terms_verified=[],
-                rejection_reason=f"Article published on {draft.published_date} is too old (freshness window: {self.settings.lookback_hours} hours).",
-                quality_score=0.2,
+                rejection_reason="Publication date is missing; strict mode requires a verifiable date.",
+                quality_score=0.0,
                 cross_check_sources=[],
             )
+        if draft.published_date:
+            try:
+                parsed_date = date_parser.parse(draft.published_date)
+                if parsed_date.tzinfo is None:
+                    parsed_date = parsed_date.replace(tzinfo=timezone.utc)
+                if parsed_date > datetime.now(timezone.utc) + timedelta(hours=24):
+                    return VerificationResult(
+                        status=VerificationStatus.INSUFFICIENT_EVIDENCE,
+                        confidence_score=0.0,
+                        claims_checked=[],
+                        hallucinations_detected=[],
+                        technical_terms_verified=[],
+                        rejection_reason="Publication date is unexpectedly in the future.",
+                        quality_score=0.0,
+                        cross_check_sources=[],
+                    )
+            except (ValueError, TypeError, OverflowError):
+                if self.settings.fact_check_strict_mode:
+                    return VerificationResult(
+                        status=VerificationStatus.INSUFFICIENT_EVIDENCE,
+                        confidence_score=0.0,
+                        claims_checked=[],
+                        hallucinations_detected=[],
+                        technical_terms_verified=[],
+                        rejection_reason="Publication date is malformed and cannot be verified.",
+                        quality_score=0.0,
+                        cross_check_sources=[],
+                    )
+            if is_article_outdated(draft.published_date, self.settings.lookback_hours):
+                self.logger.warning(
+                    f"Rejecting outdated article: '{draft.title}' (Published: {draft.published_date}, lookback: {self.settings.lookback_hours}h)"
+                )
+                return VerificationResult(
+                    status=VerificationStatus.REJECTED,
+                    confidence_score=0.1,
+                    claims_checked=[],
+                    hallucinations_detected=[],
+                    technical_terms_verified=[],
+                    rejection_reason=f"Article published on {draft.published_date} is too old (freshness window: {self.settings.lookback_hours} hours).",
+                    quality_score=0.2,
+                    cross_check_sources=[],
+                )
 
         tech_notes = self._validate_technical_identifiers(draft)
 
@@ -164,25 +203,36 @@ EVALUATION CRITERIA:
             return verification
 
         except Exception as e:
-            self.logger.warning(f"Verification LLM call encountered error: {e}")
-            # Fallback heuristic verification
+            self.logger.warning(
+                "Verification provider failed for '%s'; refusing automatic approval: %s",
+                draft.title,
+                e,
+            )
+            # Fail closed: a provider outage is not evidence that a claim is true.
             return VerificationResult(
-                status=VerificationStatus.VERIFIED_WITH_CAVEATS,
-                confidence_score=0.75,
+                status=VerificationStatus.INSUFFICIENT_EVIDENCE,
+                confidence_score=0.0,
                 claims_checked=[
                     ClaimCheck(
                         claim=draft.title,
-                        status="VERIFIED",
-                        reasoning="Passed baseline structural and source heuristics.",
-                        cross_references=[draft.source_url],
+                        status="UNVERIFIED",
+                        reasoning=(
+                            "Automated verification could not be completed because "
+                            "the verification provider failed. No approval was granted."
+                        ),
+                        cross_references=[],
                     )
                 ],
                 hallucinations_detected=[],
-                technical_terms_verified=draft.entities_mentioned,
+                technical_terms_verified=[],
                 cve_validation_notes=tech_notes["cve"],
                 standards_validation_notes=tech_notes["standards"],
-                quality_score=0.8,
-                cross_check_sources=[draft.source_url],
+                rejection_reason=(
+                    "Verification unavailable: the LLM provider failed. "
+                    "Retry the fact-check before considering publication."
+                ),
+                quality_score=0.0,
+                cross_check_sources=[],
             )
 
     def _generate_verified_article(

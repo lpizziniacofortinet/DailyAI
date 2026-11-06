@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from datetime import datetime, timezone
 import tempfile
 import pytest
 from pydantic import SecretStr
@@ -110,7 +111,7 @@ def sample_draft():
         opinions_or_speculation=[],
         source_url="https://arxiv.org/abs/2608.10982",
         original_source_name="arXiv",
-        published_date="2026-08-17",
+        published_date=datetime.now(timezone.utc).date().isoformat(),
         relevance_score=0.95,
         entities_mentioned=["DeepSeek", "Math-500"],
     )
@@ -134,7 +135,7 @@ def sample_cyber_draft():
         opinions_or_speculation=[],
         source_url="https://www.cisa.gov/news-events/cybersecurity-advisories/aa26-229a",
         original_source_name="CISA Advisories",
-        published_date="2026-08-17",
+        published_date=datetime.now(timezone.utc).date().isoformat(),
         relevance_score=0.98,
         entities_mentioned=["CISA", "Linux Kernel"],
         cve_identifiers=["CVE-2026-2189"],
@@ -159,7 +160,7 @@ def sample_v2x_draft():
         opinions_or_speculation=[],
         source_url="https://5gaa.org/news/release-18-cv2x-vru-validation",
         original_source_name="5GAA",
-        published_date="2026-08-17",
+        published_date=datetime.now(timezone.utc).date().isoformat(),
         relevance_score=0.92,
         entities_mentioned=["5GAA", "Qualcomm"],
         standards_mentioned=["3GPP Release 18", "ISO 26262"],

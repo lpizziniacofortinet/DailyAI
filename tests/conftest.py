@@ -110,7 +110,7 @@ def sample_draft():
         opinions_or_speculation=[],
         source_url="https://arxiv.org/abs/2608.10982",
         original_source_name="arXiv",
-        published_date="2026-08-17",
+        published_date=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).date().isoformat(),
         relevance_score=0.95,
         entities_mentioned=["DeepSeek", "Math-500"],
     )

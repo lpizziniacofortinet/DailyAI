@@ -124,19 +124,19 @@ class FactCheckAgent(BaseAgent[List[ArticleDraft], List[VerifiedArticle]]):
                         cross_check_sources=[],
                     )
             if is_article_outdated(draft.published_date, self.settings.lookback_hours):
-            self.logger.warning(
-                f"Rejecting outdated article: '{draft.title}' (Published: {draft.published_date}, lookback: {self.settings.lookback_hours}h)"
-            )
-            return VerificationResult(
-                status=VerificationStatus.REJECTED,
-                confidence_score=0.1,
-                claims_checked=[],
-                hallucinations_detected=[],
-                technical_terms_verified=[],
-                rejection_reason=f"Article published on {draft.published_date} is too old (freshness window: {self.settings.lookback_hours} hours).",
-                quality_score=0.2,
-                cross_check_sources=[],
-            )
+                self.logger.warning(
+                    f"Rejecting outdated article: '{draft.title}' (Published: {draft.published_date}, lookback: {self.settings.lookback_hours}h)"
+                )
+                return VerificationResult(
+                    status=VerificationStatus.REJECTED,
+                    confidence_score=0.1,
+                    claims_checked=[],
+                    hallucinations_detected=[],
+                    technical_terms_verified=[],
+                    rejection_reason=f"Article published on {draft.published_date} is too old (freshness window: {self.settings.lookback_hours} hours).",
+                    quality_score=0.2,
+                    cross_check_sources=[],
+                )
 
         tech_notes = self._validate_technical_identifiers(draft)
 

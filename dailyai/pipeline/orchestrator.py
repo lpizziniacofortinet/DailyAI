@@ -1,3 +1,4 @@
+
 """Pipeline Orchestrator for DailyAI.
 
 Coordinates the end-to-end execution of Agent 1 (Research), Agent 2 (Verification),
@@ -10,6 +11,7 @@ import time
 from typing import Dict, List, Optional, Tuple
 import uuid
 
+import asyncio
 from dailyai.agents.fact_check_agent import FactCheckAgent
 from dailyai.agents.newsletter_agent import NewsletterAgent
 from dailyai.agents.research_agent import ResearchAgent
@@ -155,9 +157,76 @@ class PipelineOrchestrator:
         except Exception as e:
             logger.error(f"Failed to record pipeline run in database: {e}")
 
+        # Execute webhooks delivery if newsletter is generated
+        if newsletter:
+            data = {
+                "title": newsletter.title,
+                "content": f"DailyAI Pipeline executed successfully. {newsletter.total_articles} articles verified and published.",
+                "metadata": {
+                    "Run ID": run_id,
+                    "Duration": f"{duration_seconds}s",
+                    "AI Articles": domain_breakdown[DomainType.AI],
+                    "Cyber Articles": domain_breakdown[DomainType.CYBERSECURITY],
+                    "V2X Articles": domain_breakdown[DomainType.V2X]
+                }
+            }
+            # Run the async distribution
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(distribute_results(data))
+            except RuntimeError:
+                asyncio.run(distribute_results(data))
+
         logger.info(f"============================================================")
         logger.info(f"Pipeline Run {run_id} completed in {duration_seconds}s (Status: {delivery_status})")
         logger.info(f"Published: AI={domain_breakdown[DomainType.AI]}, Cyber={domain_breakdown[DomainType.CYBERSECURITY]}, V2X={domain_breakdown[DomainType.V2X]}")
         logger.info(f"============================================================")
 
         return report, newsletter
+
+
+from typing import Any
+
+from dailyai.config import settings as delivery_settings
+from dailyai.services.delivery import (
+    DeliveryService,
+    DiscordDeliveryService,
+    SlackDeliveryService,
+    TeamsDeliveryService
+)
+
+class DeliveryFactory:
+    @staticmethod
+    def get_enabled_services() -> List[DeliveryService]:
+        services = []
+        if delivery_settings.enable_discord and delivery_settings.discord_webhook_url:
+            services.append(DiscordDeliveryService(str(delivery_settings.discord_webhook_url)))
+        if delivery_settings.enable_slack and delivery_settings.slack_webhook_url:
+            services.append(SlackDeliveryService(str(delivery_settings.slack_webhook_url)))
+        if delivery_settings.enable_teams and delivery_settings.teams_webhook_url:
+            services.append(TeamsDeliveryService(str(delivery_settings.teams_webhook_url)))
+        return services
+
+async def distribute_results(data: Dict[str, Any]):
+    services = DeliveryFactory.get_enabled_services()
+    if not services:
+        logger.warning("Notification sequence aborted: No delivery services are currently active.")
+        return
+
+    logger.info(f"Initiating concurrent payload distribution to {len(services)} configured endpoints.")
+
+    tasks = [service.deliver(data) for service in services]
+
+    # Execute non-blocking I/O operations simultaneously.
+    # The return_exceptions=True intercepts tracebacks natively.
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for service, result in zip(services, results):
+        if isinstance(result, Exception):
+            logger.error(
+                f"Subsystem fault detected: Delivery to {service.__class__.__name__} "
+                f"crashed unexpectedly with trace: {repr(result)}"
+            )
+
+    cleanup_tasks = [service.close() for service in services]
+    await asyncio.gather(*cleanup_tasks, return_exceptions=True)

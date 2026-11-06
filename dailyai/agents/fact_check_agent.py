@@ -164,25 +164,36 @@ EVALUATION CRITERIA:
             return verification
 
         except Exception as e:
-            self.logger.warning(f"Verification LLM call encountered error: {e}")
-            # Fallback heuristic verification
+            self.logger.warning(
+                "Verification provider failed for '%s'; refusing automatic approval: %s",
+                draft.title,
+                e,
+            )
+            # Fail closed: a provider outage is not evidence that a claim is true.
             return VerificationResult(
-                status=VerificationStatus.VERIFIED_WITH_CAVEATS,
-                confidence_score=0.75,
+                status=VerificationStatus.INSUFFICIENT_EVIDENCE,
+                confidence_score=0.0,
                 claims_checked=[
                     ClaimCheck(
                         claim=draft.title,
-                        status="VERIFIED",
-                        reasoning="Passed baseline structural and source heuristics.",
-                        cross_references=[draft.source_url],
+                        status="UNVERIFIED",
+                        reasoning=(
+                            "Automated verification could not be completed because "
+                            "the verification provider failed. No approval was granted."
+                        ),
+                        cross_references=[],
                     )
                 ],
                 hallucinations_detected=[],
-                technical_terms_verified=draft.entities_mentioned,
+                technical_terms_verified=[],
                 cve_validation_notes=tech_notes["cve"],
                 standards_validation_notes=tech_notes["standards"],
-                quality_score=0.8,
-                cross_check_sources=[draft.source_url],
+                rejection_reason=(
+                    "Verification unavailable: the LLM provider failed. "
+                    "Retry the fact-check before considering publication."
+                ),
+                quality_score=0.0,
+                cross_check_sources=[],
             )
 
     def _generate_verified_article(

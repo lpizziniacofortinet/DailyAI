@@ -347,7 +347,7 @@ SMTP_PASSWORD=SG.your_sendgrid_api_key
 
 ## 🧪 Running the Test Suite
 
-The test suite includes 39 unit and integration tests covering data models, SQLite deduplication, agents, search providers, templates, delivery channels, and end-to-end pipelines:
+The test suite covers data models, SQLite deduplication, agents, search providers, templates, delivery channels, and end-to-end pipelines. Run the commands below to verify the current checkout:
 
 ```bash
 # Run full test suite

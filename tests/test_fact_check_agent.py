@@ -119,3 +119,15 @@ def test_fact_check_malformed_date_fails_closed(test_settings, mock_llm, sample_
     draft = sample_draft.model_copy(update={"published_date": "not-a-date"})
     result = agent._cross_check_and_verify(draft)
     assert result.status == VerificationStatus.INSUFFICIENT_EVIDENCE
+
+
+def test_fact_check_future_date_fails_closed(test_settings, mock_llm, sample_draft):
+    from datetime import datetime, timedelta, timezone
+
+    agent = FactCheckAgent(settings=test_settings, llm_client=mock_llm)
+    future = (datetime.now(timezone.utc) + timedelta(days=3)).date().isoformat()
+    draft = sample_draft.model_copy(update={"published_date": future})
+    result = agent._cross_check_and_verify(draft)
+    assert result.status == VerificationStatus.INSUFFICIENT_EVIDENCE
+    assert result.confidence_score == 0.0
+    assert "future" in result.rejection_reason.lower()

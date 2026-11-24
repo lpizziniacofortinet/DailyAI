@@ -14,9 +14,11 @@ from dailyai.config import Settings, get_settings
 from dailyai.models.article import DomainType
 from dailyai.models.fact_check import VerifiedArticle
 from dailyai.models.newsletter import Newsletter, NewsletterSection
+from dailyai.models.pipeline import ChannelDeliveryOutcome
 from dailyai.services.delivery.base import BaseDeliveryChannel
 from dailyai.services.delivery.email_smtp import SMTPEmailDelivery
 from dailyai.services.delivery.file_export import FileExportDelivery
+from dailyai.services.delivery.mock import MockDeliveryChannel
 from dailyai.services.llm.base import BaseLLMClient
 from dailyai.services.llm.factory import get_llm_client
 from dailyai.services.storage.base import BaseDeduplicationStore
@@ -165,13 +167,62 @@ Requirements:
         # SMTP failure must not erase a successful file archive, but total channel failure
         # must leave articles eligible for retry.
         successful_channels = 0
+        channel_outcomes: List[ChannelDeliveryOutcome] = []
         for channel in self.delivery_channels:
+            channel_name = self._resolve_channel_name(channel)
+            if isinstance(channel, SMTPEmailDelivery) and not channel.settings.email_enabled:
+                self.logger.info(
+                    f"Email delivery disabled (EMAIL_ENABLED=False). Skipping SMTP channel for '{newsletter.title}'."
+                )
+                channel_outcomes.append(
+                    ChannelDeliveryOutcome(
+                        channel=channel_name,
+                        enabled=False,
+                        attempted=False,
+                        status="SKIPPED",
+                        completed_at=datetime.now(timezone.utc),
+                    )
+                )
+                continue
+
             try:
-                if channel.deliver(newsletter):
+                ok = bool(channel.deliver(newsletter))
+                if ok:
                     successful_channels += 1
+                    channel_outcomes.append(
+                        ChannelDeliveryOutcome(
+                            channel=channel_name,
+                            enabled=True,
+                            attempted=True,
+                            status="SUCCESS",
+                            completed_at=datetime.now(timezone.utc),
+                        )
+                    )
+                else:
+                    channel_outcomes.append(
+                        ChannelDeliveryOutcome(
+                            channel=channel_name,
+                            enabled=True,
+                            attempted=True,
+                            status="FAILED",
+                            error=f"{channel.__class__.__name__} returned False",
+                            completed_at=datetime.now(timezone.utc),
+                        )
+                    )
             except Exception as e:
                 self.logger.error(f"Delivery channel '{channel.__class__.__name__}' error: {e}")
+                channel_outcomes.append(
+                    ChannelDeliveryOutcome(
+                        channel=channel_name,
+                        enabled=True,
+                        attempted=True,
+                        status="FAILED",
+                        error=str(e),
+                        completed_at=datetime.now(timezone.utc),
+                    )
+                )
 
+        newsletter.channel_outcomes = channel_outcomes
         newsletter.delivered_successfully = successful_channels > 0
         newsletter.delivery_timestamp = (
             datetime.now(timezone.utc) if successful_channels else None
@@ -190,3 +241,14 @@ Requirements:
             self.logger.info(f"Recorded {total_articles} published articles in database.")
 
         return newsletter
+
+    @staticmethod
+    def _resolve_channel_name(channel: BaseDeliveryChannel) -> str:
+        """Return normalized channel name for audit tracking."""
+        if isinstance(channel, FileExportDelivery):
+            return "file_export"
+        if isinstance(channel, SMTPEmailDelivery):
+            return "email"
+        if isinstance(channel, MockDeliveryChannel):
+            return "mock"
+        return getattr(channel, "channel_name", None) or channel.__class__.__name__.lower()

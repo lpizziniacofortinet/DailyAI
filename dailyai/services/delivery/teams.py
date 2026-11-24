@@ -2,6 +2,7 @@ from typing import Any, Dict
 from dailyai.services.delivery.base import DeliveryService
 
 class TeamsDeliveryService(DeliveryService):
+    channel_name = "teams"
 
     def build_payload(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """

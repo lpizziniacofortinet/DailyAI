@@ -1,7 +1,6 @@
 from datetime import datetime, timezone, timedelta
 import re
-from typing import Dict, List, Optional
-from dateutil import parser as date_parser
+from typing import Any, Dict, List, Optional
 
 from dailyai.agents.base import BaseAgent
 from dailyai.config import Settings, get_settings
@@ -16,22 +15,13 @@ from dailyai.services.llm.base import BaseLLMClient
 from dailyai.services.llm.factory import get_llm_client
 from dailyai.services.search.base import BaseSearchEngine
 from dailyai.services.search.factory import get_search_engine
-
-
-def is_article_outdated(date_str: Optional[str], lookback_hours: int, buffer_days: int = 2) -> bool:
-    """Return True if publication date is older than lookback window + buffer."""
-    if not date_str:
-        return False
-    try:
-        parsed = date_parser.parse(date_str)
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
-        max_age = timedelta(hours=lookback_hours + (buffer_days * 24))
-        cutoff = now - max_age
-        return parsed < cutoff
-    except Exception:
-        return False
+from dailyai.temporal import (
+    Clock,
+    DateEvaluationStatus,
+    evaluate_publication_date,
+    is_article_outdated,
+    utc_now,
+)
 
 
 CVE_REGEX = re.compile(r"CVE-\d{4}-\d{4,7}", re.IGNORECASE)
@@ -49,11 +39,14 @@ class FactCheckAgent(BaseAgent[List[ArticleDraft], List[VerifiedArticle]]):
         settings: Optional[Settings] = None,
         llm_client: Optional[BaseLLMClient] = None,
         search_engine: Optional[BaseSearchEngine] = None,
+        clock: Optional[Clock] = None,
     ):
         super().__init__(name="Agent 2 — Fact-Checking & Quality Gate")
         self.settings = settings or get_settings()
         self.llm = llm_client or get_llm_client(self.settings)
         self.search_engine = search_engine or get_search_engine(self.settings)
+        self._now: Clock = clock or utc_now
+        self.last_rejected_items: List[Dict[str, Any]] = []
 
     def _validate_technical_identifiers(self, draft: ArticleDraft) -> Dict[str, Optional[str]]:
         """Validate format of CVEs and technical standards."""
@@ -83,64 +76,44 @@ class FactCheckAgent(BaseAgent[List[ArticleDraft], List[VerifiedArticle]]):
 
     def _cross_check_and_verify(self, draft: ArticleDraft) -> VerificationResult:
         """Independently verify claims made in the research draft using LLM & heuristics."""
-        # 1. Deterministic date gate. Unknown dates are not evidence of freshness.
-        if self.settings.fact_check_strict_mode and not draft.published_date:
+        now = self._now()
+
+        # 1. Deterministic date gate shared with ResearchAgent.
+        date_eval = evaluate_publication_date(
+            date_str=draft.published_date,
+            lookback_hours=self.settings.lookback_hours,
+            now=now,
+        )
+        if date_eval.status == DateEvaluationStatus.STALE:
+            self.logger.warning(
+                f"Rejecting outdated article: '{draft.title}' (Published: {draft.published_date}, lookback: {self.settings.lookback_hours}h)"
+            )
+            return VerificationResult(
+                status=VerificationStatus.REJECTED,
+                confidence_score=0.1,
+                claims_checked=[],
+                hallucinations_detected=[],
+                technical_terms_verified=[],
+                rejection_reason=date_eval.reason,
+                quality_score=0.2,
+                cross_check_sources=[],
+            )
+        if date_eval.should_reject(strict_mode=self.settings.fact_check_strict_mode):
             return VerificationResult(
                 status=VerificationStatus.INSUFFICIENT_EVIDENCE,
                 confidence_score=0.0,
                 claims_checked=[],
                 hallucinations_detected=[],
                 technical_terms_verified=[],
-                rejection_reason="Publication date is missing; strict mode requires a verifiable date.",
+                rejection_reason=date_eval.reason,
                 quality_score=0.0,
                 cross_check_sources=[],
             )
-        if draft.published_date:
-            try:
-                parsed_date = date_parser.parse(draft.published_date)
-                if parsed_date.tzinfo is None:
-                    parsed_date = parsed_date.replace(tzinfo=timezone.utc)
-                if parsed_date > datetime.now(timezone.utc) + timedelta(hours=24):
-                    return VerificationResult(
-                        status=VerificationStatus.INSUFFICIENT_EVIDENCE,
-                        confidence_score=0.0,
-                        claims_checked=[],
-                        hallucinations_detected=[],
-                        technical_terms_verified=[],
-                        rejection_reason="Publication date is unexpectedly in the future.",
-                        quality_score=0.0,
-                        cross_check_sources=[],
-                    )
-            except (ValueError, TypeError, OverflowError):
-                if self.settings.fact_check_strict_mode:
-                    return VerificationResult(
-                        status=VerificationStatus.INSUFFICIENT_EVIDENCE,
-                        confidence_score=0.0,
-                        claims_checked=[],
-                        hallucinations_detected=[],
-                        technical_terms_verified=[],
-                        rejection_reason="Publication date is malformed and cannot be verified.",
-                        quality_score=0.0,
-                        cross_check_sources=[],
-                    )
-            if is_article_outdated(draft.published_date, self.settings.lookback_hours):
-                self.logger.warning(
-                    f"Rejecting outdated article: '{draft.title}' (Published: {draft.published_date}, lookback: {self.settings.lookback_hours}h)"
-                )
-                return VerificationResult(
-                    status=VerificationStatus.REJECTED,
-                    confidence_score=0.1,
-                    claims_checked=[],
-                    hallucinations_detected=[],
-                    technical_terms_verified=[],
-                    rejection_reason=f"Article published on {draft.published_date} is too old (freshness window: {self.settings.lookback_hours} hours).",
-                    quality_score=0.2,
-                    cross_check_sources=[],
-                )
+        if date_eval.date_unverified:
+            draft.date_unverified = True
 
         tech_notes = self._validate_technical_identifiers(draft)
 
-        now = datetime.now(timezone.utc)
         today_str = now.strftime("%Y-%m-%d")
         earliest_dt = now - timedelta(hours=self.settings.lookback_hours + 48)
         earliest_str = earliest_dt.strftime("%Y-%m-%d")
@@ -157,7 +130,7 @@ TEMPORAL CONTEXT:
 DOMAIN: {draft.domain.value}
 HEADLINE: {draft.title}
 REPORTED SOURCE: {draft.original_source_name} ({draft.source_url})
-REPORTED DATE: {draft.published_date or 'Recent'}
+REPORTED DATE: {draft.published_date or 'Unknown / Unverified'}
 SUMMARY: {draft.summary}
 KEY POINTS:
 {chr(10).join('- ' + pt for pt in draft.key_points)}
@@ -245,6 +218,8 @@ EVALUATION CRITERIA:
         clean_headline = draft.title.strip()
         # Compile caveats
         caveats = list(draft.opinions_or_speculation)
+        if draft.date_unverified:
+            caveats.append("Caveat: Publication date is unverified (date_unverified).")
         if verification.hallucinations_detected:
             caveats.extend([f"Caveat: {h}" for h in verification.hallucinations_detected])
 
@@ -281,6 +256,7 @@ Key points: {', '.join(draft.key_points)}
 
     def _run(self, input_data: List[ArticleDraft]) -> List[VerifiedArticle]:
         """Execute independent verification, filtering, and ranking of all drafts."""
+        self.last_rejected_items = []
         if not input_data:
             self.logger.warning("No drafts received from Agent 1. Returning empty verified list.")
             return []
@@ -302,8 +278,20 @@ Key points: {', '.join(draft.key_points)}
                 )
             else:
                 rejected_count += 1
+                reason = verification.rejection_reason or "Failed confidence threshold"
+                self.last_rejected_items.append(
+                    {
+                        "stage": "fact_check",
+                        "title": draft.title,
+                        "url": draft.source_url,
+                        "domain": draft.domain.value,
+                        "published_date": draft.published_date,
+                        "status": verification.status.value,
+                        "reason": reason,
+                    }
+                )
                 self.logger.warning(
-                    f"✗ REJECTED: '{draft.title}' (Confidence: {verification.confidence_score:.2f}, Reason: {verification.rejection_reason or 'Failed confidence threshold'})"
+                    f"✗ REJECTED: '{draft.title}' (Confidence: {verification.confidence_score:.2f}, Reason: {reason})"
                 )
 
         # Rank approved articles within each domain by confidence score & quality
@@ -326,6 +314,8 @@ Key points: {', '.join(draft.key_points)}
             selected = domain_articles[: self.settings.max_articles_per_category]
             final_ranked_list.extend(selected)
 
+        self._run_metadata["approved_count"] = str(approved_count)
+        self._run_metadata["rejected_count"] = str(rejected_count)
         self.logger.info(
             f"Agent 2 completed verification: {approved_count} approved, {rejected_count} rejected. "
             f"Retained {len(final_ranked_list)} top-ranked articles for publication."

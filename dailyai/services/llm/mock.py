@@ -1,5 +1,6 @@
 """Mock LLM client for deterministic unit testing, local demos, and offline modes."""
 
+from datetime import datetime, timezone
 import json
 from typing import Any, Dict, List, Optional, Type, TypeVar
 from pydantic import BaseModel
@@ -53,6 +54,8 @@ class MockLLMClient(BaseLLMClient):
             domain = "ai"
             snippet = ""
 
+            reported_date: Optional[str] = None
+
             for line in prompt.split("\n"):
                 if "domain 'ai'" in line.lower():
                     domain = "ai"
@@ -66,6 +69,10 @@ class MockLLMClient(BaseLLMClient):
                     source_name = line.replace("Reported Source:", "").strip()
                 elif line.startswith("Source URL:"):
                     source_url = line.replace("Source URL:", "").strip()
+                elif line.startswith("Reported Date:"):
+                    raw_date = line.replace("Reported Date:", "").strip()
+                    if raw_date and raw_date.lower() not in ("unknown / unverified", "recent", "none"):
+                        reported_date = raw_date.split()[0]
 
             summary = f"Authoritative technical reporting from {source_name} on recent developments in {domain.upper()}."
 
@@ -89,7 +96,7 @@ class MockLLMClient(BaseLLMClient):
                 "source_url": source_url,
                 "original_source_name": source_name,
                 "original_source_url": source_url,
-                "published_date": "2026-08-17",
+                "published_date": reported_date or datetime.now(timezone.utc).date().isoformat(),
                 "relevance_score": 0.92,
                 "entities_mentioned": ["TechCorp", "StandardBody"],
                 "cve_identifiers": ["CVE-2026-2189"] if domain == "cybersecurity" else [],

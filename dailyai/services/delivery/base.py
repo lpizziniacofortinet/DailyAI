@@ -20,7 +20,7 @@ class BaseDeliveryChannel(ABC):
 
 import httpx
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +30,11 @@ class DeliveryService(ABC):
     Enforces the implementation of payload serialization and manages the HTTP socket layer.
     """
 
+    channel_name: Optional[str] = None
+
     def __init__(self, webhook_url: str):
         self.webhook_url = webhook_url
+        self.last_error: Optional[str] = None
         # Instantiate an isolated, asynchronous HTTP client.
         # Imposes a rigorous 10-second timeout ceiling to mitigate hanging connection vulnerabilities.
         self.client = httpx.AsyncClient(timeout=httpx.Timeout(10.0))
@@ -49,6 +52,7 @@ class DeliveryService(ABC):
         Executes the network transport protocol. Serializes the payload and dispatches
         it via an asynchronous POST request. Logs operational success or traps network anomalies.
         """
+        self.last_error = None
         payload = self.build_payload(data)
         try:
             response = await self.client.post(
@@ -61,9 +65,11 @@ class DeliveryService(ABC):
             logger.info(f"Transaction Success: Payload delivered via {self.__class__.__name__}")
             return True
         except httpx.HTTPStatusError as e:
+            self.last_error = f"HTTP {e.response.status_code}: {e.response.text}"
             logger.error(f"{self.__class__.__name__} API Rejection: {e.response.status_code} - Payload: {e.response.text}")
             return False
         except httpx.RequestError as e:
+            self.last_error = f"Transport error: {str(e)}"
             logger.error(f"{self.__class__.__name__} Transport Layer Error: {str(e)}")
             return False
 

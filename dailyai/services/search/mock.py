@@ -1,6 +1,7 @@
 """Deterministic mock search engine for testing and offline execution."""
 
-from typing import Dict, List
+from datetime import datetime, timedelta, timezone
+from typing import Callable, Dict, List, Optional
 from dailyai.logging_config import get_logger
 from dailyai.models.article import DomainType, RawSourceItem
 from dailyai.services.search.base import BaseSearchEngine
@@ -83,6 +84,9 @@ MOCK_SOURCE_DATA: Dict[DomainType, List[Dict[str, str]]] = {
 class MockSearchEngine(BaseSearchEngine):
     """Deterministic mock search engine returning domain-specific items."""
 
+    def __init__(self, clock: Optional[Callable[[], datetime]] = None):
+        self._now = clock or (lambda: datetime.now(timezone.utc))
+
     def search(
         self,
         query: str,
@@ -90,17 +94,19 @@ class MockSearchEngine(BaseSearchEngine):
         max_results: int = 5,
         lookback_hours: int = 24,
     ) -> List[RawSourceItem]:
-        """Return predefined domain items."""
+        """Return predefined domain items with timestamps relative to the reference clock."""
         raw_items = MOCK_SOURCE_DATA.get(domain, [])
+        ref_now = self._now()
         results = []
-        for item in raw_items[:max_results]:
+        for idx, item in enumerate(raw_items[:max_results]):
+            item_dt = ref_now - timedelta(hours=idx + 1)
             results.append(
                 RawSourceItem(
                     title=item["title"],
                     url=item["url"],
                     snippet=item["snippet"],
                     source_name=item["source_name"],
-                    published_at=item["published_at"],
+                    published_at=item_dt.strftime("%Y-%m-%d %H:%M:%S"),
                     domain=domain,
                     raw_metadata={"mock": True, "query": query},
                 )

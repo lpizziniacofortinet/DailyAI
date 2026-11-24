@@ -38,28 +38,42 @@ CURATED_RSS_FEEDS: Dict[DomainType, List[Dict[str, str]]] = {
 }
 
 
-def parse_feed_date(entry: feedparser.FeedParserDict) -> Optional[datetime]:
-    """Extract and parse publication date from feed entry."""
+def parse_feed_dates(entry: feedparser.FeedParserDict) -> tuple[Optional[datetime], Optional[datetime]]:
+    """Extract publication date and updated date separately from a feed entry."""
+    published_dt: Optional[datetime] = None
+    updated_dt: Optional[datetime] = None
+
     if hasattr(entry, "published_parsed") and entry.published_parsed:
         try:
-            return datetime.fromtimestamp(time.mktime(entry.published_parsed), tz=timezone.utc)
+            published_dt = datetime.fromtimestamp(time.mktime(entry.published_parsed), tz=timezone.utc)
+        except Exception:
+            pass
+    elif hasattr(entry, "published") and entry.published:
+        try:
+            parsed_tuple = email.utils.parsedate_to_datetime(entry.published)
+            published_dt = parsed_tuple.astimezone(timezone.utc)
         except Exception:
             pass
 
     if hasattr(entry, "updated_parsed") and entry.updated_parsed:
         try:
-            return datetime.fromtimestamp(time.mktime(entry.updated_parsed), tz=timezone.utc)
+            updated_dt = datetime.fromtimestamp(time.mktime(entry.updated_parsed), tz=timezone.utc)
         except Exception:
             pass
-
-    if hasattr(entry, "published") and entry.published:
+    elif hasattr(entry, "updated") and entry.updated:
         try:
-            parsed_tuple = email.utils.parsedate_to_datetime(entry.published)
-            return parsed_tuple.astimezone(timezone.utc)
+            parsed_tuple = email.utils.parsedate_to_datetime(entry.updated)
+            updated_dt = parsed_tuple.astimezone(timezone.utc)
         except Exception:
             pass
 
-    return None
+    return published_dt, updated_dt
+
+
+def parse_feed_date(entry: feedparser.FeedParserDict) -> Optional[datetime]:
+    """Extract and parse publication date from feed entry without conflating updated date."""
+    published_dt, _ = parse_feed_dates(entry)
+    return published_dt
 
 
 def clean_html_summary(html_text: str) -> str:
@@ -107,7 +121,7 @@ class RSSFeedAggregator:
                     title = entry.get("title", "").strip()
                     link = entry.get("link", "").strip()
                     summary = clean_html_summary(entry.get("summary", entry.get("description", "")))
-                    pub_dt = parse_feed_date(entry)
+                    pub_dt, updated_dt = parse_feed_dates(entry)
 
                     # Filter out entries older than lookback_hours if date is available
                     if pub_dt and pub_dt < cutoff_time:
@@ -121,6 +135,7 @@ class RSSFeedAggregator:
                                 snippet=summary[:800],
                                 source_name=feed_name,
                                 published_at=pub_dt.strftime("%Y-%m-%d %H:%M:%S") if pub_dt else None,
+                                updated_at=updated_dt.strftime("%Y-%m-%d %H:%M:%S") if updated_dt else None,
                                 domain=domain,
                                 raw_metadata={"source_type": "rss", "feed_url": feed_url},
                             )

@@ -41,6 +41,9 @@ class RawSourceItem(BaseModel):
     snippet: str = Field(default="", description="Snippet, summary, or extracted text")
     source_name: str = Field(default="Web", description="Name of publisher or feed")
     published_at: Optional[str] = Field(default=None, description="Reported publication date string")
+    updated_at: Optional[str] = Field(default=None, description="Reported last-updated timestamp string")
+    event_date: Optional[str] = Field(default=None, description="Reported event date string, distinct from publication date")
+    date_unverified: bool = Field(default=False, description="True when publication date could not be verified")
     domain: DomainType = Field(..., description="Target technology domain")
     raw_metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional crawler metadata")
 
@@ -65,6 +68,9 @@ class ArticleDraft(BaseModel):
     original_source_name: str = Field(default="Unknown", description="Original publisher/organization")
     original_source_url: Optional[str] = Field(default=None, description="Original source URL if syndicated")
     published_date: Optional[str] = Field(default=None, description="Publication date (YYYY-MM-DD if available)")
+    updated_date: Optional[str] = Field(default=None, description="Last-updated date if distinct from publication date")
+    event_date: Optional[str] = Field(default=None, description="Event date if distinct from publication date")
+    date_unverified: bool = Field(default=False, description="True when publication date could not be verified")
     
     relevance_score: float = Field(default=0.8, ge=0.0, le=1.0, description="Estimated domain relevance")
     entities_mentioned: List[str] = Field(default_factory=list, description="Key entities (companies, models, orgs)")

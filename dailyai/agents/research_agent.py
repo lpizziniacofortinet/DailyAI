@@ -4,10 +4,9 @@ Collects, deduplicates, and synthesizes the latest authoritative news and techni
 developments in Artificial Intelligence, Cybersecurity, and V2X technologies.
 """
 
-from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Optional
 import uuid
-from dateutil import parser as date_parser
 
 from dailyai.agents.base import BaseAgent
 from dailyai.config import Settings, get_settings
@@ -19,22 +18,13 @@ from dailyai.services.search.factory import get_search_engine
 from dailyai.services.search.rss import RSSFeedAggregator
 from dailyai.services.storage.base import BaseDeduplicationStore
 from dailyai.services.storage.sqlite import SQLiteDeduplicationStore
-
-
-def is_article_outdated(date_str: Optional[str], lookback_hours: int, buffer_days: int = 2) -> bool:
-    """Return True if publication date is older than lookback window + buffer."""
-    if not date_str:
-        return False
-    try:
-        parsed = date_parser.parse(date_str)
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
-        max_age = timedelta(hours=lookback_hours + (buffer_days * 24))
-        cutoff = now - max_age
-        return parsed < cutoff
-    except Exception:
-        return False
+from dailyai.temporal import (
+    Clock,
+    DateEvaluation,
+    evaluate_publication_date,
+    is_article_outdated,
+    utc_now,
+)
 
 
 # Domain-specific search query templates for discovering recent authoritative developments
@@ -70,6 +60,7 @@ class ResearchAgent(BaseAgent[Optional[Dict[str, Any]], List[ArticleDraft]]):
         search_engine: Optional[BaseSearchEngine] = None,
         rss_aggregator: Optional[RSSFeedAggregator] = None,
         storage: Optional[BaseDeduplicationStore] = None,
+        clock: Optional[Clock] = None,
     ):
         super().__init__(name="Agent 1 — Research & Intelligence")
         self.settings = settings or get_settings()
@@ -77,6 +68,25 @@ class ResearchAgent(BaseAgent[Optional[Dict[str, Any]], List[ArticleDraft]]):
         self.search_engine = search_engine or get_search_engine(self.settings)
         self.rss = rss_aggregator or (RSSFeedAggregator() if self.settings.enable_rss_feeds else None)
         self.storage = storage or SQLiteDeduplicationStore(self.settings.database_path)
+        self._now: Clock = clock or utc_now
+        self.last_quarantined_items: List[Dict[str, Any]] = []
+
+    def is_article_outdated(
+        self,
+        date_str: Optional[str],
+        lookback_hours: Optional[int] = None,
+        buffer_days: int = 2,
+        now: Optional[datetime] = None,
+        strict_mode: Optional[bool] = None,
+    ) -> bool:
+        """Evaluate whether a publication date fails this agent's freshness gate."""
+        return is_article_outdated(
+            date_str=date_str,
+            lookback_hours=lookback_hours if lookback_hours is not None else self.settings.lookback_hours,
+            buffer_days=buffer_days,
+            now=now if now is not None else self._now(),
+            strict_mode=self.settings.fact_check_strict_mode if strict_mode is None else strict_mode,
+        )
 
     def _gather_raw_items_for_domain(self, domain: DomainType) -> List[RawSourceItem]:
         """Aggregate raw intelligence from Web Search queries and RSS feeds."""
@@ -96,7 +106,9 @@ class ResearchAgent(BaseAgent[Optional[Dict[str, Any]], List[ArticleDraft]]):
                         seen_batch_urls.add(item.url)
                         raw_items.append(item)
             except Exception as e:
-                self.logger.warning(f"Error gathering RSS feeds for domain {domain.value}: {e}")
+                warn_msg = f"Error gathering RSS feeds for domain {domain.value}: {e}"
+                self.logger.warning(warn_msg)
+                self._run_warnings.append(warn_msg)
 
         # 2. Ingest Web Search Hits
         queries = DOMAIN_SEARCH_QUERIES.get(domain, [])[: self.settings.search_queries_per_category]
@@ -113,7 +125,9 @@ class ResearchAgent(BaseAgent[Optional[Dict[str, Any]], List[ArticleDraft]]):
                         seen_batch_urls.add(hit.url)
                         raw_items.append(hit)
             except Exception as e:
-                self.logger.warning(f"Error querying search engine for '{query}': {e}")
+                warn_msg = f"Error querying search engine for '{query}': {e}"
+                self.logger.warning(warn_msg)
+                self._run_warnings.append(warn_msg)
 
         self.logger.info(f"Gathered {len(raw_items)} candidate raw items for domain '{domain.value}'")
         return raw_items
@@ -139,10 +153,31 @@ class ResearchAgent(BaseAgent[Optional[Dict[str, Any]], List[ArticleDraft]]):
                     self.logger.debug(f"Skipping near-duplicate title: {item.title}")
                     continue
 
-            # Check date staleness if published_at is present
-            if item.published_at and is_article_outdated(item.published_at, self.settings.lookback_hours):
-                self.logger.debug(f"Skipping stale raw item ({item.published_at}): {item.title}")
+            # Evaluate publication date strictly (fail closed in strict mode; flag unverified in non-strict mode)
+            date_eval: DateEvaluation = evaluate_publication_date(
+                date_str=item.published_at,
+                lookback_hours=self.settings.lookback_hours,
+                now=self._now(),
+            )
+            if date_eval.should_reject(strict_mode=self.settings.fact_check_strict_mode):
+                self.logger.warning(
+                    f"Quarantining raw item '{item.title}' ({date_eval.status.value}): {date_eval.reason}"
+                )
+                self.last_quarantined_items.append(
+                    {
+                        "stage": "research",
+                        "title": item.title,
+                        "url": item.url,
+                        "domain": item.domain.value,
+                        "published_at": item.published_at,
+                        "status": date_eval.status.value,
+                        "reason": date_eval.reason,
+                    }
+                )
                 continue
+
+            if date_eval.date_unverified:
+                item = item.model_copy(update={"date_unverified": True})
 
             # Basic quality filter: ignore very short snippets or spam titles
             if len(item.title.strip()) < 10:
@@ -155,7 +190,7 @@ class ResearchAgent(BaseAgent[Optional[Dict[str, Any]], List[ArticleDraft]]):
 
     def _synthesize_draft(self, raw_item: RawSourceItem) -> Optional[ArticleDraft]:
         """Use LLM to extract structured facts, key takeaways, and metadata."""
-        now = datetime.now(timezone.utc)
+        now = self._now()
         today_str = now.strftime("%Y-%m-%d")
 
         prompt = f"""
@@ -169,7 +204,7 @@ TEMPORAL CONTEXT:
 Raw Title: {raw_item.title}
 Reported Source: {raw_item.source_name}
 Source URL: {raw_item.url}
-Reported Date: {raw_item.published_at or 'Recent'}
+Reported Date: {raw_item.published_at or 'Unknown / Unverified'}
 Content / Snippet:
 {raw_item.snippet}
 
@@ -202,7 +237,14 @@ YOUR OBJECTIVES:
             draft.source_url = raw_item.url
             if not draft.original_source_name or draft.original_source_name == "Unknown":
                 draft.original_source_name = raw_item.source_name
-            if raw_item.published_at and not draft.published_date:
+            if raw_item.updated_at and not draft.updated_date:
+                draft.updated_date = raw_item.updated_at.split()[0]
+            if raw_item.event_date and not draft.event_date:
+                draft.event_date = raw_item.event_date
+            if raw_item.date_unverified:
+                draft.date_unverified = True
+                draft.published_date = raw_item.published_at
+            elif raw_item.published_at and not draft.published_date:
                 draft.published_date = raw_item.published_at.split()[0]
 
             return draft
@@ -219,13 +261,21 @@ YOUR OBJECTIVES:
                 opinions_or_speculation=[],
                 source_url=raw_item.url,
                 original_source_name=raw_item.source_name,
-                published_date=raw_item.published_at.split()[0] if raw_item.published_at else None,
+                published_date=(
+                    raw_item.published_at
+                    if raw_item.date_unverified
+                    else (raw_item.published_at.split()[0] if raw_item.published_at else None)
+                ),
+                updated_date=raw_item.updated_at.split()[0] if raw_item.updated_at else None,
+                event_date=raw_item.event_date,
+                date_unverified=raw_item.date_unverified,
                 relevance_score=0.75,
             )
 
     def _run(self, input_data: Optional[Dict[str, Any]] = None) -> List[ArticleDraft]:
         """Execute complete research and intelligence collection across all domains."""
         all_drafts: List[ArticleDraft] = []
+        self.last_quarantined_items = []
         domains_to_process = [DomainType.AI, DomainType.CYBERSECURITY, DomainType.V2X]
 
         for domain in domains_to_process:
@@ -246,5 +296,7 @@ YOUR OBJECTIVES:
             self.logger.info(f"Domain '{domain.value}' synthesized {len(domain_drafts)} research drafts.")
             all_drafts.extend(domain_drafts)
 
+        self._run_metadata["quarantined_count"] = str(len(self.last_quarantined_items))
+        self._run_metadata["date_unverified_count"] = str(sum(1 for d in all_drafts if d.date_unverified))
         self.logger.info(f"Agent 1 produced a total of {len(all_drafts)} research drafts.")
         return all_drafts

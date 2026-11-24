@@ -124,7 +124,50 @@ async def test_orchestrator_fault_isolation(sample_data):
     slack_route = respx.post(slack_url).mock(return_value=httpx.Response(200))
 
     with patch("dailyai.pipeline.orchestrator.DeliveryFactory.get_enabled_services", return_value=services):
-        await distribute_results(sample_data)
+        outcomes = await distribute_results(sample_data)
 
     assert discord_route.called is True
     assert slack_route.called is True
+    by_channel = {o.channel: o for o in outcomes}
+    assert by_channel["discord"].status == "FAILED"
+    assert by_channel["discord"].error is not None
+    assert by_channel["slack"].status == "SUCCESS"
+
+
+@pytest.mark.asyncio
+async def test_distribute_results_closes_all_clients_on_exception(sample_data):
+    """Ensure all DeliveryService clients are closed even when one raises an unexpected exception."""
+    from unittest.mock import AsyncMock
+    from dailyai.services.delivery.teams import TeamsDeliveryService
+
+    discord_svc = DiscordDeliveryService("https://discord.com/api/webhooks/secret-123")
+    slack_svc = SlackDeliveryService("https://hooks.slack.com/services/T00/B00/XXX")
+    teams_svc = TeamsDeliveryService("https://outlook.office.com/webhook/secret")
+
+    discord_svc.deliver = AsyncMock(side_effect=RuntimeError("boom with https://discord.com/api/webhooks/secret-123"))
+    slack_svc.deliver = AsyncMock(return_value=True)
+    teams_svc.deliver = AsyncMock(return_value=False)
+    teams_svc.last_error = "HTTP 503: Service Unavailable"
+
+    discord_svc.close = AsyncMock()
+    slack_svc.close = AsyncMock()
+    teams_svc.close = AsyncMock()
+
+    with patch(
+        "dailyai.pipeline.orchestrator.DeliveryFactory.get_enabled_services",
+        return_value=[discord_svc, slack_svc, teams_svc],
+    ):
+        outcomes = await distribute_results(sample_data)
+
+    # All clients closed in finally block
+    discord_svc.close.assert_awaited_once()
+    slack_svc.close.assert_awaited_once()
+    teams_svc.close.assert_awaited_once()
+
+    by_channel = {o.channel: o for o in outcomes}
+    assert by_channel["discord"].status == "FAILED"
+    assert "secret-123" not in (by_channel["discord"].error or "")
+    assert "[REDACTED]" in (by_channel["discord"].error or "")
+    assert by_channel["slack"].status == "SUCCESS"
+    assert by_channel["teams"].status == "FAILED"
+    assert "503" in (by_channel["teams"].error or "")

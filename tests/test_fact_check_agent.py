@@ -131,3 +131,31 @@ def test_fact_check_future_date_fails_closed(test_settings, mock_llm, sample_dra
     assert result.status == VerificationStatus.INSUFFICIENT_EVIDENCE
     assert result.confidence_score == 0.0
     assert "future" in result.rejection_reason.lower()
+
+
+def test_fact_check_consistent_freshness_with_fixed_clock(test_settings, mock_llm, sample_draft):
+    """Verify FactCheckAgent applies identical boundary, timezone, and non-strict semantics with injectable clock."""
+    from datetime import datetime, timezone
+
+    fixed_now = datetime(2026, 11, 24, 12, 0, 0, tzinfo=timezone.utc)
+    clock = lambda: fixed_now
+
+    # Strict mode: boundary fresh passes, 1s past boundary fails
+    strict_agent = FactCheckAgent(settings=test_settings, llm_client=mock_llm, clock=clock)
+    boundary_fresh = sample_draft.model_copy(update={"published_date": "2026-11-21T12:00:00Z"})
+    res_fresh = strict_agent._cross_check_and_verify(boundary_fresh)
+    assert res_fresh.status in (VerificationStatus.VERIFIED, VerificationStatus.VERIFIED_WITH_CAVEATS)
+
+    boundary_stale = sample_draft.model_copy(update={"published_date": "2026-11-21T11:59:59Z"})
+    res_stale = strict_agent._cross_check_and_verify(boundary_stale)
+    assert res_stale.status == VerificationStatus.REJECTED
+
+    # Non-strict mode: missing date is retained with date_unverified caveat, never implying freshness
+    test_settings.fact_check_strict_mode = False
+    nonstrict_agent = FactCheckAgent(settings=test_settings, llm_client=mock_llm, clock=clock)
+    missing_draft = sample_draft.model_copy(update={"published_date": None})
+    run_res = nonstrict_agent.execute([missing_draft])
+    assert run_res.success is True
+    assert len(run_res.output) == 1
+    assert run_res.output[0].draft.date_unverified is True
+    assert any("unverified" in c.lower() for c in run_res.output[0].caveats_and_uncertainty)

@@ -29,6 +29,8 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
     def __init__(self, name: str):
         self.name = name
         self.logger = get_logger(f"agents.{name.lower().replace(' ', '_')}")
+        self._run_warnings: List[str] = []
+        self._run_metadata: Dict[str, str] = {}
 
     @abstractmethod
     def _run(self, input_data: InputT) -> OutputT:
@@ -41,6 +43,8 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
         started_at = datetime.now(timezone.utc)
         start_mono = time.monotonic()
         errors: List[str] = []
+        self._run_warnings = []
+        self._run_metadata = {}
         output: Optional[OutputT] = None
         status = "SUCCESS"
         items_in = len(input_data) if isinstance(input_data, (list, tuple, dict)) else 1
@@ -52,6 +56,9 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
                 items_out = len(output)
             elif output is not None:
                 items_out = 1
+            if self._run_warnings:
+                errors.extend(self._run_warnings)
+                status = "PARTIAL_SUCCESS"
             self.logger.info(f"<== Finished execution of Agent: '{self.name}' (output items: {items_out})")
         except Exception as e:
             self.logger.error(f"Fatal error during agent '{self.name}' execution: {e}", exc_info=True)
@@ -71,10 +78,11 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
             items_out=items_out,
             status=status,
             errors=errors,
+            metadata=dict(self._run_metadata),
         )
 
         return AgentResult(
-            success=(status == "SUCCESS"),
+            success=(status in ("SUCCESS", "PARTIAL_SUCCESS")),
             output=output,
             record=record,
             errors=errors,

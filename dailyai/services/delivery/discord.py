@@ -2,6 +2,7 @@ from typing import Any, Dict
 from dailyai.services.delivery.base import DeliveryService
 
 class DiscordDeliveryService(DeliveryService):
+    channel_name = "discord"
 
     def _truncate(self, text: str, limit: int) -> str:
         """

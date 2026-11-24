@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 from dailyai.models.article import DomainType
 from dailyai.models.fact_check import VerifiedArticle
+from dailyai.models.pipeline import ChannelDeliveryOutcome
 
 
 class NewsletterSection(BaseModel):
@@ -40,6 +41,10 @@ class Newsletter(BaseModel):
     recipients: List[str] = Field(default_factory=list, description="Target recipient email addresses")
     delivered_successfully: bool = Field(default=False, description="Whether delivery succeeded")
     delivery_timestamp: Optional[datetime] = Field(default=None, description="Time of delivery dispatch")
+    channel_outcomes: List[ChannelDeliveryOutcome] = Field(
+        default_factory=list,
+        description="Per-channel delivery outcomes recorded by Agent 3",
+    )
 
     @property
     def domain_counts(self) -> Dict[str, int]:

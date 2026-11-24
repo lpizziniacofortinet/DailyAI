@@ -1,9 +1,37 @@
 """Data models for pipeline tracking, audit logs, and performance metrics."""
 
 from datetime import datetime, timezone
-from typing import Dict, List, Literal, Optional
+from enum import Enum
+from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 from dailyai.models.article import DomainType
+
+
+class DeliveryStatus(str, Enum):
+    """Aggregate delivery status for a pipeline run."""
+
+    DELIVERED = "DELIVERED"
+    PARTIAL = "PARTIAL"
+    FAILED = "FAILED"
+    SAVED_ONLY = "SAVED_ONLY"
+    PENDING = "PENDING"
+
+
+class ChannelDeliveryOutcome(BaseModel):
+    """Per-channel delivery audit record."""
+
+    channel: str = Field(..., description="Normalized channel identifier (e.g. file_export, email, slack, teams, discord)")
+    enabled: bool = Field(default=True, description="Whether this channel was enabled for delivery")
+    attempted: bool = Field(default=True, description="Whether a delivery attempt was executed")
+    status: Literal["SUCCESS", "FAILED", "SKIPPED"] = Field(
+        ...,
+        description="Channel-level delivery outcome",
+    )
+    error: Optional[str] = Field(default=None, description="Sanitized error detail if delivery failed")
+    completed_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="UTC timestamp when this channel completed",
+    )
 
 
 class AgentExecutionRecord(BaseModel):
@@ -42,7 +70,20 @@ class PipelineRunReport(BaseModel):
         default_factory=list,
         description="Execution trace for each agent",
     )
-    delivery_status: str = Field(default="PENDING", description="Delivery outcome status")
-    is_success: bool = Field(default=True, description="Whether overall pipeline succeeded")
-    errors: List[str] = Field(default_factory=list, description="Any critical error messages")
+    delivery_outcomes: List[ChannelDeliveryOutcome] = Field(
+        default_factory=list,
+        description="Per-channel delivery outcomes across archive, email, and webhooks",
+    )
+    quarantined_items: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Audit details of articles quarantined or rejected during research/fact-check",
+    )
+    delivery_status: str = Field(default=DeliveryStatus.PENDING.value, description="Aggregate delivery outcome status")
+    run_status: Literal["SUCCESS", "PARTIAL", "FAILED"] = Field(
+        default="SUCCESS",
+        description="Overall pipeline execution status",
+    )
+    is_success: bool = Field(default=True, description="Whether overall pipeline succeeded without failure")
+    report_persisted: bool = Field(default=True, description="Whether this report was durably persisted")
+    errors: List[str] = Field(default_factory=list, description="Any critical or non-fatal error messages")
     newsletter_id: Optional[str] = Field(default=None, description="Generated newsletter ID if created")
